@@ -1,7 +1,7 @@
 ################################################################################
 # WeBWorK Online Homework Delivery System
 # Copyright © 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
-# $CVSHeader: webwork2/lib/WeBWorK/ContentGenerator/Login.pm,v 1.46 2007/08/13 22:59:55 sh002i Exp $
+# $CVSHeader: webwork2/lib/WeBWorK/ContentGenerator/Login.pm,v 1.47 2012/06/08 22:59:55 wheeler Exp $
 # 
 # This program is free software; you can redistribute it and/or modify it under
 # the terms of either: (a) the GNU General Public License as published by the
@@ -116,6 +116,16 @@ sub links {
 	my @return = (" ");
 	return( @return);
 }
+
+sub pre_header_initialize {
+	my ($self) = @_;
+	my $authen = $self->r->authen;
+	
+	if ( defined($authen->{redirect}) && $authen->{redirect} ) {
+		$self->reply_with_redirect($authen->{redirect});
+	}
+}
+
 
 sub body {
 	my ($self) = @_;

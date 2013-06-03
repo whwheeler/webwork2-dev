@@ -1,7 +1,7 @@
 ################################################################################
 # WeBWorK Online Homework Delivery System>
 # Copyright © 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
-# $CVSHeader: webwork2/lib/WeBWorK/DB.pm,v 1.111 2010/05/19 01:44:05 gage Exp $
+# $CVSHeader: webwork2/lib/WeBWorK/DB.pm,v 1.112 2012/06/08 22:40:00 wheeler Exp $
 # 
 # This program is free software; you can redistribute it and/or modify it under
 # the terms of either: (a) the GNU General Public License as published by the
@@ -779,10 +779,10 @@ sub addKey {
 		my ($userID, $proctorID) = ($1, $2);
 		croak "addKey: user $userID not found"
 #			unless $self->{user}->exists($userID);
-			unless $Key -> key eq "nonce" or $self->{user}->exists($Key->user_id);
+			unless $Key -> key eq "nonce" or $self->{user}->exists($userID);
 		croak "addKey: proctor $proctorID not found"
 #			unless $self->{user}->exists($proctorID);
-			unless $Key -> key eq "nonce" or $self->{user}->exists($Key->user_id);
+			unless $Key -> key eq "nonce" or $self->{user}->exists($proctorID);
 	} else {
 		croak "addKey: user ", $Key->user_id, " not found"
 #			unless $self->{user}->exists($Key->user_id);
@@ -1052,6 +1052,99 @@ sub deleteLocationAddress {
 
 
 ################################################################################
+# past_answers functions
+################################################################################
+
+BEGIN {
+	*PastAnswer = gen_schema_accessor("past_answer");
+	*newPastAnswer = gen_new("past_answer");
+	*countPastAnswersWhere = gen_count_where("past_answer");
+	*existsPastAnswersWhere = gen_exists_where("past_answer");
+	*listPastAnswersWhere = gen_list_where("past_answer");
+	*getPastAnswersWhere = gen_get_records_where("past_answer");
+}
+
+sub countProblemPastAnswers { return scalar shift->listPastAnswers(@_) }
+
+sub listProblemPastAnswers {
+        my ($self, $courseID, $userID, $setID, $problemID) = shift->checkArgs(\@_, qw/course_id user_id set_id problem_id/);
+ my $where = [course_id_eq_user_id_eq_set_id_eq_problem_id_eq => $courseID,$userID,$setID,$problemID];
+        my $order = [ 'answer_id' ];
+
+	if (wantarray) {
+		return map { @$_ } $self->{past_answer}->get_fields_where(["answer_id"], $where, $order);
+	} else {
+		return $self->{past_answer}->count_where($where);
+	}
+}
+
+
+sub latestProblemPastAnswer {
+        my ($self, $courseID, $userID, $setID, $problemID) = shift->checkArgs(\@_, qw/course_id user_id set_id problem_id/);
+	my @answerIDs = $self->listProblemPastAnswers($courseID,$userID,$setID,$problemID);
+	#array should already be returned from lowest id to greatest.  Latest answer is greatest
+	return $answerIDs[$#answerIDs];
+}
+
+
+sub existsPastAnswer {
+	my ($self, $answerID) = shift->checkArgs(\@_, qw/answer_id/);
+	return $self->{past_answer}->exists($answerID);
+}
+
+sub getPastAnswer {
+	my ($self, $answerID) = shift->checkArgs(\@_, qw/answer_id/);
+	return ( $self->getPastAnswers([$answerID]) )[0];
+}
+
+sub getPastAnswers {
+	my ($self, @answerIDs) = shift->checkArgsRefList(\@_, qw/answer_id*/);
+	return $self->{past_answer}->gets(map { [$_] } @answerIDs);
+}
+
+sub addPastAnswer {
+	my ($self, $pastAnswer) = shift->checkArgs(\@_, qw/REC:past_answer/);
+
+#       we dont have a course table yet but when we do we should check this
+
+#	croak "addPastAnswert: course ", $pastAnswer->course_id, " not found"
+#		unless $self->{course}->exists($pastAnswer->course_id);
+
+	croak "addPastAnswert: user problem ", $pastAnswer->user_id, " ", 
+              $pastAnswer->set_id, " ", $pastAnswer->problem_id, " not found"
+		unless 	$self->{problem_user}->exists($pastAnswer->user_id, 
+						      $pastAnswer->set_id,
+						      $pastAnswer->problem_id);
+
+	eval {
+		return $self->{past_answer}->add($pastAnswer);
+	};
+	if (my $ex = caught WeBWorK::DB::Ex::RecordExists) {
+		croak "addPastAnswer: past answer exists (perhaps you meant to use putPastAnswer?)";
+	} elsif ($@) {
+		die $@;
+	}
+}
+
+sub putPastAnswer {
+	my ($self, $pastAnswer) = shift->checkArgs(\@_, qw/REC:past_answer/);
+	my $rows = $self->{past_answer}->put($pastAnswer); # DBI returns 0E0 for 0.
+	if ($rows == 0) {
+		croak "putPastAnswer: past answer not found (perhaps you meant to use addPastAnswer?)";
+	} else {
+		return $rows;
+	}
+}
+
+sub deletePastAnswer {
+	# userID and achievementID can be undefined if being called from this package
+	my $U = caller eq __PACKAGE__ ? "!" : "";
+	my ($self, $answer_id) = shift->checkArgs(\@_, "answer_id$U");
+	return $self->{past_answer}->delete($answer_id);
+}
+
+
+################################################################################
 # set functions
 ################################################################################
 
@@ -1262,7 +1355,11 @@ sub deleteGlobalUserAchievement {
 	# userAchievementID can be undefined if being called from this package
 	my $U = caller eq __PACKAGE__ ? "!" : "";
 	my ($self, $userID) = shift->checkArgs(\@_, "user_id$U");
-	return $self->{global_user_achievement}->delete($userID);
+	if ($self->{global_user_achievement}){
+		return $self->{global_user_achievement}->delete($userID);
+	} else {
+		return 0;
+	}
 }
 
 
@@ -2165,7 +2262,9 @@ sub checkKeyfields($;$) {
 	my ($Record, $versioned) = @_;
 	foreach my $keyfield ($Record->KEYFIELDS) {
 		my $value = $Record->$keyfield;
-		
+		my $fielddata = $Record->FIELD_DATA;
+		return if ($fielddata->{$keyfield}{type}=~/AUTO_INCREMENT/);
+
 		croak "undefined '$keyfield' field"
 			unless defined $value;
 		croak "empty '$keyfield' field"

@@ -1,3 +1,4 @@
+*~
 .svn
 .DS_Store
 .*
@@ -8,4 +9,8 @@ tmp/*
 logs/*
 conf/*.conf
 conf/*.apache2-config
-courses.dist/*
+htdocs/site_info.txt
+htdocs/applets/*.swf
+bin/wwapache2ctl
+webwork2.komodoproject
+#courses.dist/*
